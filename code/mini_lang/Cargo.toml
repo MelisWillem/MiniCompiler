@@ -6,5 +6,6 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.1.6", features = ["derive"] }
 lexer = { path = "../lexer" }
+parser = { path = "../parser" }
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

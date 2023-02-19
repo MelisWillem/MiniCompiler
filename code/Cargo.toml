@@ -1,2 +1,2 @@
 [workspace]
-members = ["lexer", "mini_lang"]
+members = ["lexer", "mini_lang", "parser"]

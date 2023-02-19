@@ -48,7 +48,8 @@ fn main() {
     let file_as_string = process_filepath(&args.file_path);
 
     let mut lexer = Lexer::new(args.file_path, file_as_string);
-    let tokens = lexer.scan();
-
-    println!("Parsed tokens: {:?}.", &tokens);
+    let lexer_result = lexer.scan();
+    println!("Parsed tokens: {:?}.", &lexer_result);
+    
+    let mut parser = parser::Parser::new(lexer_result.tokens);
 }
