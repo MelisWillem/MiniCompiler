@@ -1,6 +1,8 @@
 use clap::Parser;
 use std::{fs::File, io::Read};
 
+use lexer::Lexer;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about)]
 struct Args{
@@ -9,7 +11,7 @@ struct Args{
     file_path: std::path::PathBuf,
 }
 
-fn process_filepath( file_path: std::path::PathBuf)
+fn process_filepath( file_path: &std::path::PathBuf) -> String
 {
     let mut file_as_string = String::new();
     match File::open(&file_path){
@@ -17,6 +19,7 @@ fn process_filepath( file_path: std::path::PathBuf)
             if let Err(error) = file.read_to_string(&mut file_as_string){
                 eprintln!("Error on reading file with error: {error}");
             }
+            file_as_string
         },
         Err(e) => {
             eprintln!("Error on opening filestream to file.");
@@ -42,7 +45,10 @@ fn main() {
         std::process::exit(-1);
     }
 
-    let file_as_string = process_filepath(args.file_path);
-    
-    println!("Hello, world!");
+    let file_as_string = process_filepath(&args.file_path);
+
+    let mut lexer = Lexer::new(args.file_path, file_as_string);
+    let tokens = lexer.scan();
+
+    println!("Parsed tokens: {:?}.", &tokens);
 }
