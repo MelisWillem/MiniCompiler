@@ -20,11 +20,50 @@ pub enum TokenType {
     LeftCurlyBrackets,
     RightCurlyBrackets,
 
+    SmallerThen,
+    GreaterThen,
+
     Space,
     EndOfLine,
 
     Number(i32), // just int's not floats at this point
-    Word(String),
+    Identifier(String),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Associativity{
+    Left, 
+    Right
+}
+
+impl TokenType {
+    pub fn precedence(&self) -> i32 {
+        match self {
+            TokenType::SmallerThen => 0,
+            TokenType::GreaterThen => 0,
+            TokenType::Plus => 20,
+            TokenType::Minus => 20,
+            TokenType::Mul => 40,
+            TokenType::Div => 40,
+            _ => -1,
+        }
+    }
+
+    pub fn associativity(&self) -> Associativity{
+        Associativity::Left
+    }
+
+    pub fn is_binary_operator(&self) -> bool {
+        match self {
+            TokenType::SmallerThen => true,
+            TokenType::GreaterThen => true,
+            TokenType::Plus => true,
+            TokenType::Minus => true,
+            TokenType::Mul => true,
+            TokenType::Div => true,
+            _ => false,
+        }
+    }
 }
 
 pub fn to_string(t: &TokenType) -> String {
@@ -49,11 +88,14 @@ pub fn to_string(t: &TokenType) -> String {
         TokenType::LeftCurlyBrackets => String::from("{"),
         TokenType::RightCurlyBrackets => String::from("{"),
 
+        TokenType::SmallerThen => String::from("<"),
+        TokenType::GreaterThen => String::from(">"),
+
         TokenType::Space => String::from(" "),
         TokenType::EndOfLine => String::from("\n"),
 
         TokenType::Number(i) => i.to_string(),
-        TokenType::Word(s) => s.to_string(),
+        TokenType::Identifier(s) => s.to_string(),
     }
 }
 

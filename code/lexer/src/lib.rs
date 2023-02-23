@@ -171,6 +171,8 @@ impl Lexer {
                    ']'  => {tokens.push(self.create_token(TokenType::RightSquareBrackets))},
                    '{'  => {tokens.push(self.create_token(TokenType::LeftCurlyBrackets))},
                    '}'  => {tokens.push(self.create_token(TokenType::RightCurlyBrackets))},
+                   '<'  => {tokens.push(self.create_token(TokenType::SmallerThen))},
+                   '>'  => {tokens.push(self.create_token(TokenType::GreaterThen))},
                    c => {
                     if c.is_numeric()
                     {
@@ -192,7 +194,7 @@ impl Lexer {
                                 "if"  => tokens.push(self.create_token(TokenType::If)),
                                 "else"  => tokens.push(self.create_token(TokenType::Else)),
                                 "var"  => tokens.push(self.create_token(TokenType::Var)),
-                                _ => tokens.push(self.create_token(TokenType::Word(word)))
+                                _ => tokens.push(self.create_token(TokenType::Identifier(word)))
                             }
                         }
                         else{
@@ -234,7 +236,7 @@ mod tests {
 
     #[test]
     fn single_char_tokens() {
-        let input = "+-*/-=== (){}[]";
+        let input = "+-*/-=== (){}[]<>";
         let expected_types = vec![
             TokenType::Plus,
             TokenType::Minus,
@@ -249,7 +251,9 @@ mod tests {
             TokenType::LeftCurlyBrackets,
             TokenType::RightCurlyBrackets,
             TokenType::LeftSquareBrackets,
-            TokenType::RightSquareBrackets
+            TokenType::RightSquareBrackets,
+            TokenType::SmallerThen,
+            TokenType::GreaterThen
         ];
 
         let mut sut = Lexer::new(PathBuf::new(), String::from(input));
