@@ -1,9 +1,10 @@
 pub mod ast;
 
-use std::{borrow::Borrow, fmt::format, ops::Deref, path::PathBuf};
-
 use ast::*;
 use lexer::token::{Associativity, Token, TokenType};
+use std::borrow::Borrow;
+use std::panic::UnwindSafe;
+use std::rc::Rc;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -27,6 +28,11 @@ impl Parser {
         panic!("{message}");
     }
 
+    fn error_owned(&mut self, message: String) {
+        // Dirty hack to get going
+        panic!("{message}");
+    }
+
     fn peek(&self) -> Option<&Token> {
         if self.current >= self.tokens.len() {
             return None;
@@ -34,14 +40,14 @@ impl Parser {
         Some(&self.tokens[self.current])
     }
 
-    fn peek_next(&self) -> Option<&Token> {
-        let next = self.current + 1;
+    // fn peek_next(&self) -> Option<&Token> {
+    //     let next = self.current + 1;
 
-        if next >= self.tokens.len() {
-            return None;
-        }
-        Some(&self.tokens[next])
-    }
+    //     if next >= self.tokens.len() {
+    //         return None;
+    //     }
+    //     Some(&self.tokens[next])
+    // }
 
     pub fn consume(&mut self) -> Option<Token> {
         if self.current >= self.tokens.len() {
@@ -60,13 +66,13 @@ impl Parser {
         return true;
     }
 
-    fn peek_is_token_type(&self, tok_type: TokenType) -> bool {
-        if let Some(t) = self.peek() {
-            return t.token_type == tok_type;
-        }
+    // fn peek_is_token_type(&self, tok_type: TokenType) -> bool {
+    //     if let Some(t) = self.peek() {
+    //         return t.token_type == tok_type;
+    //     }
 
-        false
-    }
+    //     false
+    // }
 
     fn consume_tokentype(&mut self, tok_type: TokenType) -> Option<Token> {
         // This is sometimes problematic as TokenType can contain values
@@ -137,12 +143,12 @@ impl Parser {
         }
     }
 
-    fn buildOperator(operator_token: Token, lhs: ExprKind, rhs: ExprKind) -> Option<ExprKind> {
+    fn build_operator(operator_token: Token, lhs: ExprKind, rhs: ExprKind) -> Option<ExprKind> {
         match operator_token.token_type {
             t if t.is_binary_operator() => Some(ExprKind::Binary(BinaryExpr {
                 operator: Parser::token_type_to_binary_op(t).unwrap(),
-                left: Box::new(lhs),
-                right: Box::new(rhs),
+                left: Rc::new(lhs),
+                right: Rc::new(rhs),
             })),
             _ => None,
         }
@@ -191,7 +197,7 @@ impl Parser {
                     };
 
                 let rhs = self.expr(Some(next_precendence)).unwrap();
-                lhs = Some(Parser::buildOperator(operator_token, lhs.unwrap(), rhs).unwrap());
+                lhs = Some(Parser::build_operator(operator_token, lhs.unwrap(), rhs).unwrap());
             } else {
                 // if no more binary operators -> exit
                 return lhs;
@@ -201,75 +207,210 @@ impl Parser {
         lhs
     }
 
-    fn stmt(&mut self) -> Option<StmtKind> {
-        // examples of statements
-        // i = i + 1;
-        // a = 5;
-        // b = a;
-        // -> The lhs is a identifier -> must be word token.
-        // -> The rhs is an expression -> expr()
-        if let Some(left) = self.consume() {
-            match left.token_type {
-                TokenType::Identifier(name) => {
-                    if let Some(right) = self.expr(None) {
-                        // TODO create statement
-                    } else {
-                        self.error("Unable to read rhs of expression.")
+    fn expr_stmt(&mut self) -> Option<Ast> {
+        if let Some(lhs) = self.expr(None) {
+            if let Some(seperator) = self.peek() {
+                match seperator.token_type {
+                    TokenType::Assign => {
+                        self.consume();
+                        if let Some(rhs) = self.expr(None) {
+                            return Some(Ast::Assign(AssignExpr {
+                                left: Box::new(lhs),
+                                right: Box::new(rhs),
+                            }));
+                        }
+                    }
+                    TokenType::SemiColon => {
+                        self.consume(); // consume the ;
+                    }
+                    _ => {
+                        self.error("Error can't parse expression statement, expected '=' or ';'");
                     }
                 }
-                _ => {
-                    self.error("Should be identifier.");
-                }
             }
-        } else {
-            self.error("Unable to parse left side of statement, invalid expression.");
         }
-
         None
     }
 
-    fn bblock(&mut self) -> Option<Ast>{
-        let mut statements: Vec<StmtKind> = Vec::new();
+    fn if_stmt(&mut self) -> Option<Ast> {
+        None
+    }
 
+    fn stmt(&mut self) -> Option<Ast> {
+        if let Some(t) = self.peek() {
+            return match &t.token_type {
+                TokenType::If => self.if_stmt(),
+                _ => return self.expr_stmt(),
+            };
+        }
+        None
+    }
+
+    fn bblock(&mut self) -> Option<Box<Ast>> {
         if let Some(t) = self.consume() {
             match t.token_type {
                 TokenType::RightSquareBrackets => {}
-                _ => 
-                {
+                _ => {
                     self.error("Missing open brackets on basic block.");
                     return None;
                 } // early exit not open bracket
             }
         }
 
+        let mut statements: Vec<Box<Ast>> = Vec::new();
         loop {
-            if let Some(t) = self.consume(){
-                let ast = match t.token_type{
-                    TokenType::LeftCurlyBrackets => self.bblock(),
+            if let Some(t) = self.peek() {
+                let maybe_statement = match t.token_type {
                     TokenType::RightCurlyBrackets => None,
-                    _ => {
-                        let err_msg = format!("unexpected token {:?}", t);
-                        self.error(&err_msg);
-                        return None;
-                    }
+                    _ => self.stmt(),
                 };
-            }
 
-            return None;
+                if let Some(stmt) = maybe_statement {
+                    statements.push(Box::new(stmt));
+                } else {
+                    break;
+                }
+            }
         }
+
+        Some(Box::new(Ast::BasicBlock {
+            statements,
+        }))
     }
 
-    fn decl(&mut self) -> Option<ExprKind> {
+    fn var_decl(&mut self) -> Option<Ast> {
         self.consume_tokentype(TokenType::Var);
-        if let Some(identifier) = self.identifier() {
-            Some(ExprKind::Decl(identifier))
+        if let Some(name) = self.identifier() {
+            if let Some(rhs) = self.expr(None) {
+                return Some(Ast::VarDecl { name, rhs });
+            } else {
+                self.error(format!("no rhs on variable declarion of {0}", name).as_str());
+            }
+            None
         } else {
             self.error("Expected identifier name");
             None
         }
     }
 
+    fn func_decl(&mut self) -> Option<Ast> {
+        if let None = self.consume_tokentype(TokenType::Func {}) {
+            self.error("A function declaration should start wiht func");
+            return None;
+        }
+
+        if let None = self.identifier() {
+            self.error_owned(format!("Expected function name"));
+        }
+
+        if let None = self.consume_tokentype(TokenType::LeftParen {}) {
+            self.error("Expected left paren to define the arguments of the function.")
+        }
+
+        let mut args: Vec<FunArg> = vec![];
+        loop {
+            if let Some(name) = self.identifier() {
+                if let None = self.consume_tokentype(TokenType::Colon {}) {
+                    self.error("Colon missing between argument identifier and type.");
+                }
+                if let Some(type_name) = self.identifier() {
+                    let arg_type = UnresolvedType { name: type_name };
+                    args.push(FunArg { name, arg_type });
+                } else {
+                    self.error("Expected type name.")
+                }
+            } else {
+                break;
+            }
+
+            if let None = self.consume_tokentype(TokenType::Comma) {
+                // No more arguments, so break the loop.
+                break;
+            }
+        }
+
+        if let None = self.consume_tokentype(TokenType::RightParen {}) {
+            self.error("Expected closing parent of function arguments"); }
+
+        // Try to consume arrow "->" or "{"
+        let mut return_type = UnresolvedType{name:"void".to_owned()}; // TODO!!
+        if let Some(maybe_arrow) = self.peek(){
+                if maybe_arrow.token_type == TokenType::Minus
+                {  
+                    self.consume(); // consume minus
+                    if let Some(maybe_greather_then) =  self.consume(){
+                        if maybe_greather_then.token_type == TokenType::GreaterThen{
+                            if let Some(token) = self.consume(){
+                                match token.token_type {
+                                    TokenType::Identifier(id) => {return_type = UnresolvedType{name:id};},
+                                    _ => {}
+                                }
+                            }
+                        }
+                        else{
+                            self.error("Unexpected ending, expected '>' after '-' to indicate return type");
+                        }
+                    }
+                    else{
+                        self.error("Unexpected ending, expected '>' after '-' to indicate return type");
+                    }
+                }
+            }
+        else{
+            self.error("Unexpected ending at function declaration, expected either -> or {");
+        }
+
+
+        let implementation = self.bblock();
+        Some(Ast::FunDecl{
+            name: "test_func".to_owned(),
+            args,
+            returns: return_type,
+            implementation
+        })
+    }
+
+    fn struct_decl(&mut self) -> Option<Ast> {
+        None
+    }
+
     fn call(&mut self) -> Option<ExprKind> {
+        if let Some(CalleeNameToken) = self.consume()
+        {
+            let mut callee = String::from("unknown callee");
+            if let TokenType::Identifier(id) = CalleeNameToken.token_type {
+                callee = id;
+            }
+            else{
+                self.error("Expected identifier as callee name");
+            }
+            if let Some(LeftParenToken) = self.consume()
+            {
+                let mut args: Vec<ExprKind> = vec![];
+                loop {
+                    if let Some(arg) = self.expr(None) {
+                        args.push(arg);
+                    } else {
+                        break;
+                    }
+
+                    if let None = self.consume_tokentype(TokenType::Comma) {
+                        // No more arguments, so break the loop.
+                        break;
+                    }
+                }
+
+                if let None = self.consume_tokentype(TokenType::RightParen) {
+                    self.error("Expected closing parent of function arguments");
+                }
+
+                return Some(ExprKind::CallExpr {
+                    callee: callee,
+                    args,
+                });
+            }
+        }
+
         None
     }
 
@@ -278,8 +419,8 @@ impl Parser {
             if let Some(t) = self.peek() {
                 match t.token_type.borrow() {
                     // Top level can only be a struct or a function at this point.
-                    TokenType::Func => self.decl(),
-                    TokenType::Struct => self.decl(),
+                    TokenType::Func => self.func_decl(),
+                    TokenType::Struct => self.struct_decl(),
                     _ => {
                         // unknown symbol
                         break;
@@ -292,43 +433,94 @@ impl Parser {
     }
 }
 
-fn buildConst(value: i32) -> Box<ExprKind> {
-    Box::<ExprKind>::new(ExprKind::Literal(LiteralExpr {
-        constant_type: BuildinTypeKind::Int,
-        value: value,
-    }))
-}
-
-fn buildMul(left: Box<ExprKind>, right: Box<ExprKind>) -> Box<ExprKind> {
-    let bin = BinaryExpr {
-        operator: BinaryOperatorKind::Mul,
-        left: left,
-        right: right,
-    };
-    Box::<ExprKind>::new(ExprKind::Binary(bin))
-}
-
-fn buildSum(left: Box<ExprKind>, right: Box<ExprKind>) -> Box<ExprKind> {
-    let bin = BinaryExpr {
-        operator: BinaryOperatorKind::Plus,
-        left: left,
-        right: right,
-    };
-    Box::<ExprKind>::new(ExprKind::Binary(bin))
-}
-
 #[test]
-fn expressions() {
-    let test_data = vec![("2+3*4", "(+ 2 (* 3 4))"), ("2*3+4", "(+ (* 2 3) 4)")];
+fn test_expressions() {
+    let two = Rc::new(ExprKind::Literal(LiteralExpr {
+        constant_type: BuildinTypeKind::Int,
+        value: 2,
+    }));
+    let three = Rc::new(ExprKind::Literal(LiteralExpr {
+        constant_type: BuildinTypeKind::Int,
+        value: 3,
+    }));
+    let four = Rc::new(ExprKind::Literal(LiteralExpr {
+        constant_type: BuildinTypeKind::Int,
+        value: 4,
+    }));
+    let three_time_four = Rc::new(ExprKind::Binary(BinaryExpr {
+        operator: BinaryOperatorKind::Mul,
+        left: three.clone(),
+        right: four.clone(),
+    }));
+
+    let first_expr_ast = Rc::new(ExprKind::Binary(BinaryExpr {
+        operator: BinaryOperatorKind::Plus,
+        left: two.clone(),
+        right: three_time_four,
+    }));
+
+    let second_expr_ast = Rc::new(ExprKind::Binary(BinaryExpr {
+        operator: BinaryOperatorKind::Plus,
+        left: Rc::new(ExprKind::Binary(BinaryExpr {
+            operator: BinaryOperatorKind::Mul,
+            left: two.clone(),
+            right: three.clone(),
+        })),
+        right: four,
+    }));
+
+    let test_data = vec![("2+3*4", first_expr_ast), ("2*3+4", second_expr_ast)];
 
     for (str_expression, expected_parsed_expression) in test_data {
-        let lexer_res = lexer::Lexer::new(PathBuf::new(), str_expression.to_owned()).scan();
+        let lexer_res =
+            lexer::Lexer::new(std::path::PathBuf::new(), str_expression.to_owned()).scan();
         let expr = Parser::new(lexer_res.tokens).expr(None);
 
         assert!(expr.is_some());
-        let expr = expr.unwrap().to_string();
-
-        println!("parsed expression {}", expr);
-        assert_eq!(expr, expected_parsed_expression);
+        let expr = expr.unwrap();
+        let l = expr.borrow();
+        let r = expected_parsed_expression.borrow();
+        assert_eq!(l, r);
     }
+}
+
+#[test]
+fn test_ast() {
+    let str_expression = "func square(int a) -> int{
+            return a*2;
+        }";
+    let return_statement = Ast::ReturnStatement(Some(ExprKind::Binary(BinaryExpr {
+        operator: BinaryOperatorKind::Mul,
+        left: Rc::new(ExprKind::Identifier("a".to_owned())),
+        right: Rc::new(ExprKind::Literal(LiteralExpr {
+            constant_type: BuildinTypeKind::Int,
+            value: 2,
+        })),
+    })));
+    let fun_arg = FunArg {
+        name: "a".to_owned(),
+        arg_type: UnresolvedType {
+            name: "int".to_owned(),
+        },
+    };
+    let expected_expression = Ast::FunDecl {
+        name: "func_square".to_string(),
+        args: vec![fun_arg],
+        returns: UnresolvedType {
+            name: "int".to_owned(),
+        },
+        implementation: Some(Box::new(Ast::BasicBlock {
+            statements: vec![Box::new(return_statement)],
+        })),
+    };
+
+    let lexer_res = lexer::Lexer::new(std::path::PathBuf::new(), str_expression.to_owned()).scan();
+    let mut parser = Parser::new(lexer_res.tokens);
+    let expr = parser.parse();
+
+    assert!(expr.is_some());
+    let expr = expr.unwrap();
+
+    println!("parsed expression {:?}", expr);
+    assert_eq!(expr, expected_expression    );
 }

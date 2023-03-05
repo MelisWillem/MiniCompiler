@@ -1,7 +1,7 @@
 pub mod token;
 
 use std::path::PathBuf;
-use token::{*};
+use token::*;
 
 pub struct Lexer {
     file_path: PathBuf,
@@ -140,7 +140,7 @@ impl Lexer {
         let total_string = self.current_token_strings();
         match total_string.len() {
             0 => None,
-            _ => Some(total_string)
+            _ => Some(total_string),
         }
     }
 
@@ -165,6 +165,9 @@ impl Lexer {
                    '/'  => {tokens.push(self.create_token(TokenType::Div))},
                    ' '  => {tokens.push(self.create_token(TokenType::Space))},
                    '\n'  => {tokens.push(self.create_token(TokenType::EndOfLine))},
+                   ','  => {tokens.push(self.create_token(TokenType::Comma))},
+                   ':'  => {tokens.push(self.create_token(TokenType::Colon))},
+                   ';'  => {tokens.push(self.create_token(TokenType::SemiColon))},
                    '('  => {tokens.push(self.create_token(TokenType::LeftParen))},
                    ')'  => {tokens.push(self.create_token(TokenType::RightParen))},
                    '['  => {tokens.push(self.create_token(TokenType::LeftSquareBrackets))},
@@ -253,7 +256,7 @@ mod tests {
             TokenType::LeftSquareBrackets,
             TokenType::RightSquareBrackets,
             TokenType::SmallerThen,
-            TokenType::GreaterThen
+            TokenType::GreaterThen,
         ];
 
         let mut sut = Lexer::new(PathBuf::new(), String::from(input));

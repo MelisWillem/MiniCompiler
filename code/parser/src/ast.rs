@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum BinaryOperatorKind {
     Plus,
@@ -25,8 +27,8 @@ impl BinaryOperatorKind {
 #[derive(Debug, PartialEq, Eq)]
 pub struct BinaryExpr {
     pub operator: BinaryOperatorKind,
-    pub left: Box<ExprKind>,
-    pub right: Box<ExprKind>,
+    pub left: Rc<ExprKind>,
+    pub right: Rc<ExprKind>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -35,31 +37,7 @@ pub enum OperatorAssociativity {
     Right,
 }
 
-impl BinaryExpr {
-    fn precedence(&self) -> i32 {
-        match self.operator {
-            BinaryOperatorKind::SmallerThen => 0,
-            BinaryOperatorKind::GreaterThen => 0,
-            BinaryOperatorKind::Plus => 20,
-            BinaryOperatorKind::Minus => 20,
-            BinaryOperatorKind::Mul => 40,
-            BinaryOperatorKind::Div => 40,
-        }
-    }
-
-    fn associativity(&self) -> OperatorAssociativity {
-        match self.operator {
-            BinaryOperatorKind::SmallerThen => OperatorAssociativity::Left,
-            BinaryOperatorKind::GreaterThen => OperatorAssociativity::Left,
-            BinaryOperatorKind::Plus => OperatorAssociativity::Left,
-            BinaryOperatorKind::Minus => OperatorAssociativity::Left,
-            BinaryOperatorKind::Mul => OperatorAssociativity::Left,
-            BinaryOperatorKind::Div => OperatorAssociativity::Left,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum BuildinTypeKind {
     Int,
 }
@@ -79,7 +57,7 @@ pub enum TypeKind {
     Aggregate(AggregateType),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct LiteralExpr {
     pub constant_type: BuildinTypeKind,
     pub value: i32, // Only one kind of constant at this time.
@@ -95,7 +73,10 @@ pub enum ExprKind {
     Identifier(String),
     Literal(LiteralExpr),
     Binary(BinaryExpr),
-    Decl(String),
+    CallExpr {
+        callee: String,
+        args: Vec<ExprKind>,
+    }
 }
 
 impl ExprKind {
@@ -109,7 +90,13 @@ impl ExprKind {
                 bin_expr.left.to_string(),
                 bin_expr.right.to_string()
             ),
-            ExprKind::Decl(name) => name.to_owned(),
+            ExprKind::CallExpr { callee, args } => {
+                let mut args_str = String::new();
+                for arg in args {
+                    args_str.push_str(&arg.to_string());
+                }
+                format!("{}({})", callee, args_str)
+            }
         }
     }
 }
@@ -121,13 +108,42 @@ pub struct AssignExpr {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum StmtKind {
+pub enum Ast {
     Assign(AssignExpr),
+    ReturnStatement(Option<ExprKind>),
+    VarDecl {
+        name: String,
+        rhs: ExprKind,
+    },
+    IfStmt {
+        condition: Expr,
+        code: Box<Vec<Ast>>,
+        else_code: Option<Box<Vec<Ast>>>,
+    },
+    BasicBlock {
+        statements: Vec<Box<Ast>>,
+    },
+    FunDecl {
+        name: String,
+        args: Vec<FunArg>,
+        returns: UnresolvedType,
+        implementation: Option<Box<Ast>>,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Ast {
-    Expr(ExprKind),
-    BasicBlock(),
-    Stmt(StmtKind),
+pub struct UnresolvedType {
+    pub name: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct FunArg {
+    pub name: String,
+    pub arg_type: UnresolvedType,
+}
+
+impl FunArg {
+    pub fn to_string(&self) -> String {
+        format!("(arg {0} {1})", self.arg_type.name, self.name).to_owned()
+    }
 }

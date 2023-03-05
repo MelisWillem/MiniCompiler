@@ -25,15 +25,18 @@ pub enum TokenType {
 
     Space,
     EndOfLine,
+    Comma,
+    Colon,
+    SemiColon,
 
     Number(i32), // just int's not floats at this point
     Identifier(String),
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Associativity{
-    Left, 
-    Right
+pub enum Associativity {
+    Left,
+    Right,
 }
 
 impl TokenType {
@@ -49,7 +52,7 @@ impl TokenType {
         }
     }
 
-    pub fn associativity(&self) -> Associativity{
+    pub fn associativity(&self) -> Associativity {
         Associativity::Left
     }
 
@@ -93,6 +96,9 @@ pub fn to_string(t: &TokenType) -> String {
 
         TokenType::Space => String::from(" "),
         TokenType::EndOfLine => String::from("\n"),
+        TokenType::Comma => String::from(","),
+        TokenType::Colon => String::from(":"),
+        TokenType::SemiColon => String::from(";"),
 
         TokenType::Number(i) => i.to_string(),
         TokenType::Identifier(s) => s.to_string(),
