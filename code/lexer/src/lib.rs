@@ -197,6 +197,7 @@ impl Lexer {
                                 "if"  => tokens.push(self.create_token(TokenType::If)),
                                 "else"  => tokens.push(self.create_token(TokenType::Else)),
                                 "var"  => tokens.push(self.create_token(TokenType::Var)),
+                                "return"  => tokens.push(self.create_token(TokenType::Return)),
                                 _ => tokens.push(self.create_token(TokenType::Identifier(word)))
                             }
                         }

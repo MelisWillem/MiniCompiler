@@ -6,6 +6,7 @@ pub enum TokenType {
     Else,
     Var,
     Assign,
+    Return,
 
     Plus,
     Minus,
@@ -82,6 +83,7 @@ pub fn to_string(t: &TokenType) -> String {
         TokenType::Mul => String::from("*"),
         TokenType::Div => String::from("/"),
         TokenType::Assign => String::from("="),
+        TokenType::Return => String::from("return"),
         TokenType::Equal => String::from("=="),
 
         TokenType::LeftParen => String::from("("),
@@ -89,7 +91,7 @@ pub fn to_string(t: &TokenType) -> String {
         TokenType::LeftSquareBrackets => String::from("["),
         TokenType::RightSquareBrackets => String::from("]"),
         TokenType::LeftCurlyBrackets => String::from("{"),
-        TokenType::RightCurlyBrackets => String::from("{"),
+        TokenType::RightCurlyBrackets => String::from("}"),
 
         TokenType::SmallerThen => String::from("<"),
         TokenType::GreaterThen => String::from(">"),
