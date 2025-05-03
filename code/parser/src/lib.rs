@@ -3,7 +3,31 @@ pub mod ast;
 use ast::*;
 use lexer::token::{Associativity, Token, TokenType};
 use std::borrow::Borrow;
+use std::fmt;
 use std::rc::Rc;
+
+#[derive(Debug)]
+pub enum ParserError {
+    UnexpectedToken(String),
+    MissingToken(String),
+    InvalidExpression(String),
+    UnexpectedEndOf(String),
+    NotImplemented(String),
+}
+
+impl fmt::Display for ParserError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParserError::UnexpectedToken(msg) => write!(f, "Unexpected token: {msg}"),
+            ParserError::MissingToken(msg) => write!(f, "Missing token: {msg}"),
+            ParserError::InvalidExpression(msg) => write!(f, "Invalid expression: {msg}"),
+            ParserError::UnexpectedEndOf(msg) => write!(f, "Unexpected end of: {msg}"),
+            ParserError::NotImplemented(msg) => write!(f, "Not implemented: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ParserError {}
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -20,16 +44,6 @@ impl Parser {
             tokens: tokens.into_iter().filter(Parser::is_relevant).collect(),
             current: 0,
         }
-    }
-
-    fn error(&mut self, message: &str) {
-        // Dirty hack to get going
-        panic!("{message}");
-    }
-
-    fn error_owned(&mut self, message: String) {
-        // Dirty hack to get going
-        panic!("{message}");
     }
 
     fn peek(&self) -> Option<&Token> {
@@ -56,62 +70,72 @@ impl Parser {
         return true;
     }
 
-    fn consume_tokentype(&mut self, tok_type: TokenType) -> Option<Token> {
+    fn try_consume_tokentype(&mut self, tok_type: TokenType) -> Result<Token, ParserError> {
         // This is sometimes problematic as TokenType can contain values
         // in which case we can't provide it as an argument here as we don't
         // know the value of it's values.
         if let Some(tok) = self.peek() {
             if tok.token_type == tok_type {
-                return self.consume();
+                return Ok(self.consume().unwrap());
             }
         }
-        return None;
+        Err(ParserError::UnexpectedToken(format!(
+            "Expected token type: {:?}",
+            tok_type
+        )))
     }
 
-    fn identifier(&mut self) -> Option<String> {
-        if let Some(tok) = self.consume() {
-            return match tok.token_type {
-                TokenType::Identifier(s) => Some(s),
-                _ => {
-                    self.undo_consume();
-                    None
-                }
-            };
+    fn identifier(&mut self) -> Result<String, ParserError> {
+        // TODO: I wonder if there is a better way to do this.
+        let a = self
+            .consume()
+            .into_iter()
+            .flat_map(|t| match t.token_type {
+                TokenType::Identifier(id) => Some(id),
+                _ => None,
+            })
+            .next();
+        if let Some(id) = a {
+            return Ok(id);
         }
-        None
+        return Err(ParserError::UnexpectedToken(format!(
+            "Expected identifier but got token {:?}",
+            self.peek()
+        )));
     }
 
-    fn number(&mut self) -> Option<LiteralExpr> {
+    fn number(&mut self) -> Result<LiteralExpr, ParserError> {
         if let Some(t) = self.consume() {
             return match t.token_type {
-                TokenType::Number(n) => Some(LiteralExpr {
+                TokenType::Number(n) => Ok(LiteralExpr {
                     constant_type: BuildinTypeKind::Int,
                     value: n,
                 }),
                 _ => {
                     self.undo_consume();
-                    None
+                    Err(ParserError::UnexpectedToken(format!(
+                        "Expected a number but got token {:?}",
+                        t
+                    )))
                 }
             };
         }
 
-        None
+        Err(ParserError::UnexpectedToken(
+            "No token consumed".to_string(),
+        ))
     }
 
-    fn number_or_identifier(&mut self) -> Option<ExprKind> {
+    fn number_or_identifier(&mut self) -> Result<ExprKind, ParserError> {
         // get the first identifier
-        if let Some(id) = self.identifier() {
-            return Some(ExprKind::Identifier(id));
-        } else if let Some(number) = self.number() {
-            return Some(ExprKind::Literal(number));
+        if let Ok(id) = self.identifier() {
+            return Ok(ExprKind::Identifier(id));
+        } else if let Ok(number) = self.number() {
+            return Ok(ExprKind::Literal(number));
         } else {
-            let wrong_token = self.peek();
-            let error_message = format!(
-                "Failed to parse expression: expected literal or number but got token {:?}.",
-                wrong_token
-            );
-            self.error(&error_message);
-            return None;
+            return Err(ParserError::UnexpectedToken(
+                "Expected identifier or number".to_string(),
+            ));
         }
     }
 
@@ -125,24 +149,31 @@ impl Parser {
         }
     }
 
-    fn build_operator(operator_token: Token, lhs: ExprKind, rhs: ExprKind) -> Option<ExprKind> {
+    fn build_operator(
+        operator_token: Token,
+        lhs: ExprKind,
+        rhs: ExprKind,
+    ) -> Result<ExprKind, ParserError> {
         match operator_token.token_type {
-            t if t.is_binary_operator() => Some(ExprKind::Binary(BinaryExpr {
+            t if t.is_binary_operator() => Ok(ExprKind::Binary(BinaryExpr {
                 operator: Parser::token_type_to_binary_op(t).unwrap(),
                 left: Rc::new(lhs),
                 right: Rc::new(rhs),
             })),
-            _ => None,
+            _ => Err(ParserError::UnexpectedToken(format!(
+                "Expected a binary operator but got token {:?}",
+                operator_token
+            ))),
         }
     }
 
-    fn expr(&mut self, current_precendence: Option<i32>) -> Option<ExprKind> {
+    fn expr(&mut self, current_precendence: Option<i32>) -> Result<ExprKind, ParserError> {
         // higher precendence is more sticky...
         let current_precendence = current_precendence.unwrap_or(-1);
 
         // https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing
         // We should alway be able to get the identifier/number if this is an expression.
-        let mut lhs = self.number_or_identifier();
+        let mut lhs = self.number_or_identifier()?;
 
         while self.current < self.tokens.len() {
             let operator_token = match self.peek() {
@@ -155,15 +186,14 @@ impl Parser {
                     self.consume()
                 }
                 Some(t) if t.token_type == TokenType::SemiColon => {
-                    return lhs; // exit the expression evaluation
+                    return Ok(lhs); // exit the expression evaluation
                 }
                 other => {
-                    println!(
-                        "Not an operator, token={:?}, peek()={:?}.",
+                    return Err(ParserError::UnexpectedToken(format!(
+                        "Not an operator, token={:?}, peek()={:?}",
                         other,
                         self.peek()
-                    );
-                    None
+                    )));
                 }
             };
 
@@ -181,77 +211,81 @@ impl Parser {
                         precedence
                     };
 
-                let rhs = self.expr(Some(next_precendence)).unwrap();
-                lhs = Some(Parser::build_operator(operator_token, lhs.unwrap(), rhs).unwrap());
+                let rhs = self.expr(Some(next_precendence))?;
+                lhs = Parser::build_operator(operator_token, lhs, rhs)?;
             } else {
                 // if no more binary operators -> exit
-                return lhs;
+                return Ok(lhs);
             }
         }
 
-        lhs
+        Ok(lhs)
     }
 
-    fn expr_stmt(&mut self) -> Option<Ast> {
-        if let Some(lhs) = self.expr(None) {
-            if let Some(seperator) = self.peek() {
-                match seperator.token_type {
-                    TokenType::Assign => {
-                        self.consume();
-                        if let Some(rhs) = self.expr(None) {
-                            return Some(Ast::Assign(AssignExpr {
-                                left: Box::new(lhs),
-                                right: Box::new(rhs),
-                            }));
-                        }
-                    }
-                    TokenType::SemiColon => {
-                        self.consume(); // consume the ;
-                    }
-                    _ => {
-                        self.error_owned(format!("Error can't parse expression statement, expected '=' or ';' but got {:?}", seperator));
-                    }
+    fn expr_stmt(&mut self) -> Result<Ast, ParserError> {
+        let lhs = self.expr(None)?;
+        if let Some(seperator) = self.peek() {
+            match seperator.token_type {
+                TokenType::Assign => {
+                    self.consume();
+                    let rhs = self.expr(None)?;
+                    return Ok(Ast::Assign(AssignExpr {
+                        left: Box::new(lhs),
+                        right: Box::new(rhs),
+                    }));
+                }
+                _ => {
+                    self.try_consume_tokentype(TokenType::SemiColon)?;
                 }
             }
         }
-        None
+
+        return Err(ParserError::UnexpectedEndOf(
+            "expression statement".to_owned(),
+        ));
     }
 
-    fn if_stmt(&mut self) -> Option<Ast> {
-        None
+    fn if_stmt(&mut self) -> Result<Ast, ParserError> {
+        return Err(ParserError::NotImplemented(
+            "if statement not implemented".to_owned(),
+        ));
     }
 
-    fn return_stmt(&mut self) -> Ast {
-        self.consume_tokentype(TokenType::Return);
-        if self.consume_tokentype(TokenType::SemiColon).is_some() {
-            return Ast::ReturnStatement(None);
+    fn return_stmt(&mut self) -> Result<Ast, ParserError> {
+        self.try_consume_tokentype(TokenType::Return)?;
+        if self.try_consume_tokentype(TokenType::SemiColon).is_ok() {
+            // no expression after return;
+            return Ok(Ast::ReturnStatement(None));
         }
-        let expr = self.expr(None);
-        if self.consume_tokentype(TokenType::SemiColon).is_none() {
-            self.error("Expected semi colon after return statement");
-        }
-        return Ast::ReturnStatement(expr);
+        let expr = self.expr(None)?;
+        self.try_consume_tokentype(TokenType::SemiColon)?;
+        Ok(Ast::ReturnStatement(Some(expr)))
     }
 
-    fn stmt(&mut self) -> Option<Ast> {
+    fn stmt(&mut self) -> Result<Ast, ParserError> {
         if let Some(t) = self.peek() {
             return match &t.token_type {
                 TokenType::If => self.if_stmt(),
-                TokenType::Return => Some(self.return_stmt()),
+                TokenType::Return => self.return_stmt(),
                 _ => return self.expr_stmt(),
             };
         }
-        None
+        return Err(ParserError::UnexpectedEndOf("statement".to_owned()));
     }
 
-    fn bblock(&mut self) -> Option<Box<Ast>> {
+    fn bblock(&mut self) -> Result<Box<Ast>, ParserError> {
         if let Some(t) = self.consume() {
             match t.token_type {
                 TokenType::LeftCurlyBrackets => {}
+                TokenType::Var => {
+                    let var_decl = self.var_decl()?;
+                    return Ok(Box::new(var_decl));
+                }
                 _ => {
-                    self.error_owned(format!("Missing open brackets on basic block, got {:?}", t));
-                    return None;
-                } // early exit not open bracket
+                    return Err(ParserError::UnexpectedEndOf(
+                        "basic block -> missing open brackets on block".to_owned(),
+                    ));
+                },
             }
         }
 
@@ -263,7 +297,7 @@ impl Parser {
                         self.consume();
                         None
                     }
-                    _ => self.stmt(),
+                    _ => Some(self.stmt()?),
                 };
 
                 if let Some(stmt) = maybe_statement {
@@ -271,167 +305,112 @@ impl Parser {
                 } else {
                     break;
                 }
-            }
-        }
-        return Some(Box::new(Ast::BasicBlock { statements }));
-    }
-
-    fn var_decl(&mut self) -> Option<Ast> {
-        self.consume_tokentype(TokenType::Var);
-        if let Some(name) = self.identifier() {
-            if let Some(rhs) = self.expr(None) {
-                return Some(Ast::VarDecl { name, rhs });
             } else {
-                self.error(format!("no rhs on variable declarion of {0}", name).as_str());
+                break;
             }
-            None
-        } else {
-            self.error("Expected identifier name");
-            None
         }
+        return Ok(Box::new(Ast::BasicBlock { statements }));
     }
 
-    fn func_decl(&mut self) -> Option<Ast> {
-        if let None = self.consume_tokentype(TokenType::Func {}) {
-            // string format
-            self.error_owned(format!("Expected func declaration, got {:?}", self.peek()));
-            return None;
-        }
+    fn var_decl(&mut self) -> Result<Ast, ParserError> {
+        self.try_consume_tokentype(TokenType::Var)?;
+        let name = self.identifier()?;
+        let rhs = self.expr(None)?;
+        return Ok(Ast::VarDecl { name, rhs });
+    }
 
-        if let None = self.identifier() {
-            self.error_owned(format!("Expected function name"));
-        }
+    fn func_decl(&mut self) -> Result<Ast, ParserError> {
+        self.try_consume_tokentype(TokenType::Func {})?;
 
-        if let None = self.consume_tokentype(TokenType::LeftParen {}) {
-            self.error("Expected left paren to define the arguments of the function.")
-        }
+        let name = self.identifier()?;
+        self.try_consume_tokentype(TokenType::LeftParen {})?;
 
         let mut args: Vec<FunArg> = vec![];
         loop {
-            if let Some(name) = self.identifier() {
-                if let None = self.consume_tokentype(TokenType::Colon {}) {
-                    self.error("Colon missing between argument identifier and type.");
-                }
-                if let Some(type_name) = self.identifier() {
-                    let arg_type = UnresolvedType { name: type_name };
-                    args.push(FunArg { name, arg_type });
-                } else {
-                    self.error("Expected type name.")
-                }
-            } else {
-                break;
-            }
+            let name = self.identifier()?;
+            self.try_consume_tokentype(TokenType::Colon {})?;
 
-            if let None = self.consume_tokentype(TokenType::Comma) {
+            let type_name = self.identifier()?;
+            let arg_type = UnresolvedType { name: type_name };
+            args.push(FunArg { name, arg_type });
+
+            if self.try_consume_tokentype(TokenType::Comma).is_err() {
                 // No more arguments, so break the loop.
                 break;
             }
+
+            if self
+                .peek()
+                .map_or(false, |t| t.token_type == TokenType::RightParen)
+            {
+                break;
+            }
         }
 
-        if let None = self.consume_tokentype(TokenType::RightParen) {
-            self.error("Expected closing parent of function arguments");
-        }
-
-        // Try to consume arrow or left curly brackets
+        // assume no return type by default
         let mut return_type = UnresolvedType {
             name: "void".to_owned(),
-        }; // TODO!!
-        if let Some(maybe_arrow) = self.peek() {
-            if maybe_arrow.token_type == TokenType::Minus {
-                self.consume(); // consume minus
-                if let Some(maybe_greather_then) = self.consume() {
-                    if maybe_greather_then.token_type == TokenType::GreaterThen {
-                        if let Some(token) = self.consume() {
-                            match token.token_type {
-                                TokenType::Identifier(id) => {
-                                    return_type = UnresolvedType { name: id };
-                                }
-                                _ => {}
-                            }
-                        }
-                    } else {
-                        self.error(
-                            "Unexpected ending, expected '>' after '-' to indicate return type",
-                        );
-                    }
-                } else {
-                    self.error("Unexpected ending, expected '>' after '-' to indicate return type");
-                }
-            }
-        } else {
-            self.error("Unexpected ending at function declaration, expected either -> or left curly brackets");
+        };
+        // Try to consume arrow or left curly brackets
+        if self.try_consume_tokentype(TokenType::LeftCurlyBrackets).is_err() {
+            self.try_consume_tokentype(TokenType::Minus)?;
+            self.try_consume_tokentype(TokenType::GreaterThen)?;
+            let id = self.identifier()?;
+            return_type = UnresolvedType { name: id };
         }
 
-        let implementation = self.bblock();
-        assert!(implementation.is_some());
-        return Some(Ast::FunDecl {
-            name: "test_func".to_owned(),
+
+        let implementation = self.bblock()?;
+        return Ok(Ast::FunDecl {
+            name: name.to_owned(),
             args,
             returns: return_type,
-            implementation,
+            implementation: Some(implementation),
         });
     }
 
-    fn struct_decl(&mut self) -> Option<Ast> {
-        None
+    fn struct_decl(&mut self) -> Result<Ast, ParserError> {
+        return Err(ParserError::NotImplemented(
+            "struct declaration not implemented".to_owned(),
+        ));
     }
 
-    fn call(&mut self) -> Option<ExprKind> {
-        if let Some(callee_name_token) = self.consume() {
-            let mut callee = String::from("unknown callee");
-            if let TokenType::Identifier(id) = callee_name_token.token_type {
-                callee = id;
-            } else {
-                self.error("Expected identifier as callee name");
-            }
-            if let Some(_left_paren_token) = self.consume() {
-                let mut args: Vec<ExprKind> = vec![];
-                loop {
-                    if let Some(arg) = self.expr(None) {
-                        args.push(arg);
-                    } else {
-                        break;
-                    }
+    fn call(&mut self) -> Result<ExprKind, ParserError> {
+        let callee = self.identifier()?;
+        if let Some(_left_paren_token) = self.consume() {
+            let mut args: Vec<ExprKind> = vec![];
+            loop {
+                let arg = self.expr(None)?;
+                args.push(arg);
 
-                    if let None = self.consume_tokentype(TokenType::Comma) {
-                        // No more arguments, so break the loop.
-                        break;
-                    }
+                if self.try_consume_tokentype(TokenType::Comma).is_ok() {
+                    // No more arguments, so break the loop.
+                    break;
                 }
-
-                if let None = self.consume_tokentype(TokenType::RightParen) {
-                    self.error("Expected closing parent of function arguments");
-                }
-
-                return Some(ExprKind::CallExpr {
-                    callee: callee,
-                    args,
-                });
             }
+
+            return Ok(ExprKind::CallExpr {
+                callee: callee,
+                args,
+            });
         }
 
-        None
+        Err(ParserError::UnexpectedToken(
+            "failed to parse function call".to_owned(),
+        ))
     }
 
-    pub fn parse(&mut self) -> Vec<Ast> {
+    pub fn parse(&mut self) -> Result<Vec<Ast>, ParserError> {
         let mut ast: Vec<Ast> = vec![];
         loop {
             if let Some(t) = self.peek() {
-                match t.token_type.borrow() {
+                match t.token_type {
                     // Top level can only be a struct or a function at this point.
                     TokenType::Func => {
-                        if let Some(statement) = self.func_decl() {
-                            ast.push(statement);
-                        } else {
-                            self.error("Failed to parse function declaration");
-                        }
+                        ast.push(self.func_decl()?);
                     }
                     TokenType::Struct => {
-                        if let Some(struct_def) = self.struct_decl() {
-                            ast.push(struct_def);
-                        } else {
-                            self.error("Failed to parse struct declaration");
-                        }
+                        ast.push(self.struct_decl()?);
                     }
                     _ => {
                         // unknown symbol
@@ -444,7 +423,7 @@ impl Parser {
             }
         }
 
-        return ast;
+        return Ok(ast);
     }
 }
 
@@ -491,7 +470,11 @@ fn test_expressions() {
             lexer::Lexer::new(std::path::PathBuf::new(), str_expression.to_owned()).scan();
         let expr = Parser::new(lexer_res.tokens).expr(None);
 
-        assert!(expr.is_some());
+        if let Err(e) = expr {
+            panic!("Error parsing expression: {e}");
+        }
+
+        assert!(expr.is_ok());
         let expr = expr.unwrap();
         let l = expr.borrow();
         let r = expected_parsed_expression.borrow();
@@ -533,8 +516,12 @@ fn test_ast() {
     println!("lexer_res: {:?}", lexer_res);
     let mut parser = Parser::new(lexer_res.tokens);
     let expr = parser.parse();
+    if let Err(e) = expr {
+        panic!("Error parsing function: {e}");
+    }
+    let expr = expr.unwrap();
+    assert_eq!(expr.len(), 1, "Expected exactly one function definition");
 
-    assert!(!expr.is_empty());
     if let Some(res_func_def_expr) = expr.first() {
         println!("parsed expression {:?}", res_func_def_expr);
         assert_eq!(res_func_def_expr, &expected_expression);
