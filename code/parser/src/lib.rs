@@ -58,7 +58,7 @@ impl Parser {
             return None;
         }
         self.current = self.current + 1;
-        Some(self.tokens[self.current - 1].clone())
+        return Some(self.tokens[self.current - 1].clone())
     }
 
     // Not sure if this is a good idea.
@@ -96,8 +96,9 @@ impl Parser {
             })
             .next();
         if let Some(id) = a {
-            return Ok(id);
+            return Ok(id.clone());
         }
+        self.undo_consume();
         return Err(ParserError::UnexpectedToken(format!(
             "Expected identifier but got token {:?}",
             self.peek()
@@ -127,7 +128,6 @@ impl Parser {
     }
 
     fn number_or_identifier(&mut self) -> Result<ExprKind, ParserError> {
-        // get the first identifier
         if let Ok(id) = self.identifier() {
             return Ok(ExprKind::Identifier(id));
         } else if let Ok(number) = self.number() {
@@ -188,12 +188,8 @@ impl Parser {
                 Some(t) if t.token_type == TokenType::SemiColon => {
                     return Ok(lhs); // exit the expression evaluation
                 }
-                other => {
-                    return Err(ParserError::UnexpectedToken(format!(
-                        "Not an operator, token={:?}, peek()={:?}",
-                        other,
-                        self.peek()
-                    )));
+                _other => {
+                    None
                 }
             };
 
