@@ -162,7 +162,14 @@ impl Lexer {
                         }
                     },
                    '+' =>  {tokens.push(self.create_token(TokenType::Plus))},
-                   '-'  => {tokens.push(self.create_token(TokenType::Minus))},
+                   '-'  => {
+                       if self.peek().map_or(false, |c| c == '>') {
+                           self.consume();
+                           tokens.push(self.create_token(TokenType::Arrow))
+                       } else {
+                           tokens.push(self.create_token(TokenType::Minus))
+                       }
+                   },
                    '*'  => {tokens.push(self.create_token(TokenType::Mul))},
                    '/'  => {tokens.push(self.create_token(TokenType::Div))},
                    ' '  => {tokens.push(self.create_token(TokenType::Space))},
@@ -242,13 +249,14 @@ mod tests {
 
     #[test]
     fn single_char_tokens() {
-        let input = "+-*/-=== (){}[]<>";
+        let input = "+-*/-->=== (){}[]<>";
         let expected_types = vec![
             TokenType::Plus,
             TokenType::Minus,
             TokenType::Mul,
             TokenType::Div,
             TokenType::Minus,
+            TokenType::Arrow,
             TokenType::Equal,
             TokenType::Assign,
             TokenType::Space,

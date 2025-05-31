@@ -13,6 +13,7 @@ pub enum TokenType {
     Mul,
     Div,
     Equal,
+    Arrow,
 
     LeftParen,
     RightParen,
@@ -85,6 +86,7 @@ pub fn to_string(t: &TokenType) -> String {
         TokenType::Assign => String::from("="),
         TokenType::Return => String::from("return"),
         TokenType::Equal => String::from("=="),
+        TokenType::Arrow => String::from("->"),
 
         TokenType::LeftParen => String::from("("),
         TokenType::RightParen => String::from(")"),
