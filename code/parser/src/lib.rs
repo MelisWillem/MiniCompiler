@@ -80,8 +80,9 @@ impl Parser {
             }
 
             return Err(ParserError::UnexpectedToken(format!(
-                "Expected token type: {:?}",
-                tok_type
+                "Expected token type: {:?} but got {:?}",
+                tok_type,
+                &tok.token_type
             ), tok.location.clone()))
         }
         return Err(ParserError::UnexpectedEndOf(format!(
@@ -91,22 +92,24 @@ impl Parser {
 
     }
 
-    fn identifier(&mut self) -> Result<String, ParserError> {
-        if let Some(token) = self.peek() {
-            if let TokenType::Identifier(id) = &token.token_type {
-                return Ok(id.clone());
+    fn try_identifier(&mut self) -> Result<String, ParserError> {
+        if let Some(token) = self.consume() {
+            if let TokenType::Identifier(id) = token.token_type {
+                return Ok(id);
             }
+            self.undo_consume();
             return Err(ParserError::UnexpectedToken(format!(
                 "Expected identifier but got token {:?}",
                 token
             ), token.location.clone()));
         }
+        self.undo_consume();
         return Err(ParserError::UnexpectedEndOf(
             "Expected identifier".to_string(),
         ));
     }
 
-    fn number(&mut self) -> Result<LiteralExpr, ParserError> {
+    fn try_number(&mut self) -> Result<LiteralExpr, ParserError> {
         if let Some(t) = self.consume() {
             return match t.token_type {
                 TokenType::Number(n) => Ok(LiteralExpr {
@@ -122,16 +125,16 @@ impl Parser {
                 }
             };
         }
-
+        self.undo_consume();
         Err(ParserError::UnexpectedEndOf(
             "No token consumed".to_string(),
         ))
     }
 
     fn number_or_identifier(&mut self) -> Result<ExprKind, ParserError> {
-        if let Ok(id) = self.identifier() {
+        if let Ok(id) = self.try_identifier() {
             return Ok(ExprKind::Identifier(id));
-        } else if let Ok(number) = self.number() {
+        } else if let Ok(number) = self.try_number() {
             return Ok(ExprKind::Literal(number));
         } else {
             if let Some(token) = self.peek() {
@@ -317,7 +320,7 @@ impl Parser {
 
     fn var_decl(&mut self) -> Result<Ast, ParserError> {
         self.try_consume_tokentype(TokenType::Var)?;
-        let name = self.identifier()?;
+        let name = self.try_identifier()?;
         let rhs = self.expr(None)?;
         return Ok(Ast::VarDecl { name, rhs });
     }
@@ -325,15 +328,15 @@ impl Parser {
     fn func_decl(&mut self) -> Result<Ast, ParserError> {
         self.try_consume_tokentype(TokenType::Func {})?;
 
-        let name = self.identifier()?;
+        let name = self.try_identifier()?;
         self.try_consume_tokentype(TokenType::LeftParen {})?;
 
         let mut args: Vec<FunArg> = vec![];
         loop {
-            let name = self.identifier()?;
+            let name = self.try_identifier()?;
             self.try_consume_tokentype(TokenType::Colon {})?;
 
-            let type_name = self.identifier()?;
+            let type_name = self.try_identifier()?;
             let arg_type = UnresolvedType { name: type_name };
             args.push(FunArg { name, arg_type });
 
@@ -349,6 +352,7 @@ impl Parser {
                 break;
             }
         }
+        self.try_consume_tokentype(TokenType::RightParen)?;
 
         // assume no return type by default
         let mut return_type = UnresolvedType {
@@ -356,9 +360,8 @@ impl Parser {
         };
         // Try to consume arrow or left curly brackets
         if self.try_consume_tokentype(TokenType::LeftCurlyBrackets).is_err() {
-            self.try_consume_tokentype(TokenType::Minus)?;
-            self.try_consume_tokentype(TokenType::GreaterThen)?;
-            let id = self.identifier()?;
+            self.try_consume_tokentype(TokenType::Arrow)?;
+            let id = self.try_identifier()?;
             return_type = UnresolvedType { name: id };
         }
 
@@ -379,7 +382,7 @@ impl Parser {
     }
 
     fn call(&mut self) -> Result<ExprKind, ParserError> {
-        let callee = self.identifier()?;
+        let callee = self.try_identifier()?;
         if let Some(_left_paren_token) = self.consume() {
             let mut args: Vec<ExprKind> = vec![];
             loop {
@@ -523,6 +526,7 @@ fn test_ast() {
         panic!("Error parsing function: {e}");
     }
     let expr = expr.unwrap();
+    println!("Parsed expression: {:?}", expr);
     assert_eq!(expr.len(), 1, "Expected exactly one function definition");
 
     if let Some(res_func_def_expr) = expr.first() {
