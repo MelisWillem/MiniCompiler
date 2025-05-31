@@ -67,12 +67,14 @@ impl Lexer {
 
     pub fn create_token(&mut self, token_type: TokenType) -> Token {
         self.begin_token = self.current;
-
-        Token::new(
-            token_type,
+        let location = Location::new(
             self.file_path.clone(),
             self.line_number,
             self.column,
+        );
+        return Token::new(
+            token_type,
+            location,
         )
     }
 

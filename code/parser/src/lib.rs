@@ -1,16 +1,16 @@
 pub mod ast;
 
 use ast::*;
-use lexer::token::{Associativity, Token, TokenType};
+use lexer::token::{Associativity, Location, Token, TokenType};
 use std::borrow::Borrow;
 use std::fmt;
 use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum ParserError {
-    UnexpectedToken(String),
-    MissingToken(String),
-    InvalidExpression(String),
+    UnexpectedToken(String, Location),
+    MissingToken(String, Location),
+    InvalidExpression(String, Location),
     UnexpectedEndOf(String),
     NotImplemented(String),
 }
@@ -18,10 +18,10 @@ pub enum ParserError {
 impl fmt::Display for ParserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParserError::UnexpectedToken(msg) => write!(f, "Unexpected token: {msg}"),
-            ParserError::MissingToken(msg) => write!(f, "Missing token: {msg}"),
-            ParserError::InvalidExpression(msg) => write!(f, "Invalid expression: {msg}"),
-            ParserError::UnexpectedEndOf(msg) => write!(f, "Unexpected end of: {msg}"),
+            ParserError::UnexpectedToken(msg, loc) => write!(f, "Unexpected token: {msg} at {:?}", loc),
+            ParserError::MissingToken(msg, loc) => write!(f, "Missing token: {msg} at {:?}", loc),
+            ParserError::InvalidExpression(msg, loc) => write!(f, "Invalid expression: {msg} at {:?}", loc),
+            ParserError::UnexpectedEndOf(msg) => write!(f, "Unexpected end of file: {msg}"),
             ParserError::NotImplemented(msg) => write!(f, "Not implemented: {msg}"),
         }
     }
@@ -78,31 +78,32 @@ impl Parser {
             if tok.token_type == tok_type {
                 return Ok(self.consume().unwrap());
             }
+
+            return Err(ParserError::UnexpectedToken(format!(
+                "Expected token type: {:?}",
+                tok_type
+            ), tok.location.clone()))
         }
-        Err(ParserError::UnexpectedToken(format!(
+        return Err(ParserError::UnexpectedEndOf(format!(
             "Expected token type: {:?}",
             tok_type
         )))
+
     }
 
     fn identifier(&mut self) -> Result<String, ParserError> {
-        // TODO: I wonder if there is a better way to do this.
-        let a = self
-            .consume()
-            .into_iter()
-            .flat_map(|t| match t.token_type {
-                TokenType::Identifier(id) => Some(id),
-                _ => None,
-            })
-            .next();
-        if let Some(id) = a {
-            return Ok(id.clone());
+        if let Some(token) = self.peek() {
+            if let TokenType::Identifier(id) = &token.token_type {
+                return Ok(id.clone());
+            }
+            return Err(ParserError::UnexpectedToken(format!(
+                "Expected identifier but got token {:?}",
+                token
+            ), token.location.clone()));
         }
-        self.undo_consume();
-        return Err(ParserError::UnexpectedToken(format!(
-            "Expected identifier but got token {:?}",
-            self.peek()
-        )));
+        return Err(ParserError::UnexpectedEndOf(
+            "Expected identifier".to_string(),
+        ));
     }
 
     fn number(&mut self) -> Result<LiteralExpr, ParserError> {
@@ -117,12 +118,12 @@ impl Parser {
                     Err(ParserError::UnexpectedToken(format!(
                         "Expected a number but got token {:?}",
                         t
-                    )))
+                    ), t.location.clone()))
                 }
             };
         }
 
-        Err(ParserError::UnexpectedToken(
+        Err(ParserError::UnexpectedEndOf(
             "No token consumed".to_string(),
         ))
     }
@@ -133,7 +134,13 @@ impl Parser {
         } else if let Ok(number) = self.number() {
             return Ok(ExprKind::Literal(number));
         } else {
-            return Err(ParserError::UnexpectedToken(
+            if let Some(token) = self.peek() {
+                return Err(ParserError::UnexpectedToken(
+                    "Expected identifier or number".to_string(),
+                    token.location.clone(),
+                ));
+            }
+            return Err(ParserError::UnexpectedEndOf(
                 "Expected identifier or number".to_string(),
             ));
         }
@@ -163,7 +170,7 @@ impl Parser {
             _ => Err(ParserError::UnexpectedToken(format!(
                 "Expected a binary operator but got token {:?}",
                 operator_token
-            ))),
+            ), operator_token.location.clone())),
         }
     }
 
@@ -391,9 +398,9 @@ impl Parser {
             });
         }
 
-        Err(ParserError::UnexpectedToken(
+        return Err(ParserError::UnexpectedEndOf(
             "failed to parse function call".to_owned(),
-        ))
+        ));
     }
 
     pub fn parse(&mut self) -> Result<Vec<Ast>, ParserError> {

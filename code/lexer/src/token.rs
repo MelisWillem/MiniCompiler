@@ -110,23 +110,30 @@ pub fn to_string(t: &TokenType) -> String {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Token {
     pub token_type: TokenType,
+    pub location: Location,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Location {
     pub file: std::path::PathBuf,
     pub line: usize,
     pub column: usize,
 }
 
+impl Location {
+    pub fn new(file: std::path::PathBuf, line: usize, column: usize) -> Location {
+        Location { file, line, column }
+    }
+}
+
 impl Token {
     pub fn new(
         token_type: TokenType,
-        file: std::path::PathBuf,
-        line: usize,
-        column: usize,
+        location: Location,
     ) -> Token {
         Token {
             token_type,
-            file,
-            line,
-            column,
+            location,
         }
     }
 }
